@@ -2,11 +2,22 @@
 
 import { useEffect, useRef } from "react";
 
-export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [], className = "" }) {
+export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [], driverLocation = null, onMapClick, className = "" }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const polylineRef = useRef(null);
+  const onMapClickRef = useRef(onMapClick);
+
+  // Keep the ref updated with the latest prop
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
+
+  // Make the ref globally accessible to bypass Leaflet closure caching
+  useEffect(() => {
+    window.__currentOnMapClick = onMapClickRef.current;
+  }, [onMapClickRef.current]);
 
   useEffect(() => {
     // Dynamic import - Leaflet needs `window` (not SSR safe)
@@ -39,6 +50,15 @@ export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [],
         maxZoom: 19,
         subdomains: "abcd",
       }).addTo(map);
+
+      // Handle clicks using the global window variable to completely avoid React rendering closures
+      map.on("click", (e) => {
+        if (window.__currentOnMapClick) {
+          window.__currentOnMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+        } else if (onMapClickRef.current) {
+          onMapClickRef.current({ lat: e.latlng.lat, lng: e.latlng.lng });
+        }
+      });
 
       mapInstanceRef.current = map;
       updateMap(L);
@@ -102,6 +122,22 @@ export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [],
           markersRef.current.push(marker);
           bounds.push([cab.lat, cab.lng]);
         });
+      }
+
+      // Driver marker (Current Location)
+      if (driverLocation?.lat && driverLocation?.lng) {
+        const driverIcon = L.divIcon({
+          html: `<div style="width:32px;height:32px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.2)">
+                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>
+                 </div>`,
+          className: "",
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+        const marker = L.marker([driverLocation.lat, driverLocation.lng], { icon: driverIcon, zIndexOffset: 1000 }).addTo(map);
+        marker.bindPopup(`<strong>Your Driver</strong>`);
+        markersRef.current.push(marker);
+        bounds.push([driverLocation.lat, driverLocation.lng]);
       }
 
       // Route polyline
@@ -195,6 +231,22 @@ export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [],
           });
         }
 
+        // Driver marker (Current Location)
+        if (driverLocation?.lat && driverLocation?.lng) {
+          const driverIcon = L.divIcon({
+            html: `<div style="width:32px;height:32px;background:white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,0.2)">
+                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-600"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>
+                   </div>`,
+            className: "",
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+          });
+          const marker = L.marker([driverLocation.lat, driverLocation.lng], { icon: driverIcon, zIndexOffset: 1000 }).addTo(map);
+          marker.bindPopup(`<strong>Your Driver</strong>`);
+          markersRef.current.push(marker);
+          bounds.push([driverLocation.lat, driverLocation.lng]);
+        }
+
         if (routeCoords && routeCoords.length > 0) {
           polylineRef.current = L.polyline(routeCoords, {
             color: "#f97316",
@@ -211,9 +263,12 @@ export default function MapView({ pickup, dropoff, routeCoords, nearbyCabs = [],
         }
       }
     }
-
-    update();
-  }, [pickup, dropoff, routeCoords, nearbyCabs]);
+    
+    // Safety check: ensure Leaflet is loaded before updating
+    if (typeof window !== "undefined") {
+      update();
+    }
+  }, [pickup, dropoff, routeCoords, nearbyCabs, driverLocation, onMapClick]);
 
   return (
     <div

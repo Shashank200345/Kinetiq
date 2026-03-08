@@ -29,9 +29,11 @@ export async function PATCH(req, { params }) {
     const { data: ride, error } = await supabase
       .from("rides")
       .update({
-        status: body.status,
+        ...(body.status !== undefined && { status: body.status }),
         updated_at: new Date().toISOString(),
         ...(body.driver_id && { driver_id: body.driver_id }),
+        ...(body.payment_status && { payment_status: body.payment_status }),
+        ...(body.current_location && { current_location: body.current_location }),
       })
       .eq("id", id)
       .select()

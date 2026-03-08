@@ -15,7 +15,6 @@ import {
 
 const menuItems = [
   { label: "Dashboard", icon: Activity, href: "/driver/dashboard" },
-  { label: "My Trips", icon: Clock, href: "/driver/trips" },
   { label: "Earnings", icon: Wallet, href: "/driver/earnings" },
   { label: "Ratings", icon: Star, href: "/driver/ratings" },
   { label: "Profile", icon: UserCheck, href: "/driver/profile" },

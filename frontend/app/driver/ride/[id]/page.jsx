@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
@@ -31,6 +31,9 @@ export default function DriverTripPage() {
   const [routeCoords, setRouteCoords] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const simulationRef = useRef(null);
+  const routeIndexRef = useRef(0);
 
   // Fetch ride data including customer info
   const fetchRide = useCallback(async () => {
@@ -84,6 +87,87 @@ export default function DriverTripPage() {
     };
   }, [id]);
 
+  // Real-time GPS Tracking
+  useEffect(() => {
+    let watchId;
+    
+    // Only track if the driver is arriving or the trip is in progress
+    if (ride && (ride.status === "driver_arriving" || ride.status === "in_progress")) {
+      if ("geolocation" in navigator) {
+        watchId = navigator.geolocation.watchPosition(
+          async (position) => {
+            const currentLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            };
+
+            // Optimistically update the driver's own screen
+            setRide((prev) => ({ ...prev, current_location: currentLocation }));
+
+            // Send to database for customer to see
+            try {
+              await fetch(`/api/rides/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ current_location: currentLocation }),
+              });
+            } catch (err) {
+              console.error("Location sync error:", err);
+            }
+          },
+          (err) => {
+            console.error("GPS Error:", err);
+            // Ignore error 2 (Position Unavailable) if we are just waiting for the Sensor override
+          },
+          // Relaxed settings so Chrome's manual sensor override works smoothly
+          { enableHighAccuracy: false, maximumAge: 0, timeout: 20000 }
+        );
+      }
+    }
+
+    return () => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [ride?.status, id, isSimulating]);
+
+  // Simulation Logic (Auto-drive along route)
+  useEffect(() => {
+    if (isSimulating && routeCoords?.length > 0 && ride && (ride.status === "driver_arriving" || ride.status === "in_progress")) {
+      // Find where we are or start at 0
+      routeIndexRef.current = 0;
+      
+      simulationRef.current = setInterval(async () => {
+        if (routeIndexRef.current >= routeCoords.length) {
+          clearInterval(simulationRef.current);
+          setIsSimulating(false);
+          return;
+        }
+
+        const nextPoint = routeCoords[routeIndexRef.current];
+        const currentLocation = { lat: nextPoint[0], lng: nextPoint[1] };
+        
+        setRide((prev) => ({ ...prev, current_location: currentLocation }));
+
+        try {
+          await fetch(`/api/rides/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ current_location: currentLocation }),
+          });
+        } catch (err) {
+          console.error("Simulation sync error:", err);
+        }
+
+        // Advance 2 points at a time for speed, adjust as needed
+        routeIndexRef.current += 2;
+      }, 2000); // Update every 2 seconds
+    }
+
+    return () => {
+      if (simulationRef.current) clearInterval(simulationRef.current);
+    };
+  }, [isSimulating, routeCoords, id, ride?.status]);
+
   const updateRideStatus = async (newStatus) => {
     setUpdating(true);
     try {
@@ -99,6 +183,32 @@ export default function DriverTripPage() {
       console.error("Error updating status:", err);
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleManualMapClick = async (coords) => {
+    if (isSimulating) return; // Don't allow manual clicks while auto-driving
+
+    console.log("MAP CLICK RECEIVED IN DRIVER COMPONENT", coords, ride?.status);
+    // Only allow manual driving if accepted, arriving, or in progress
+    if (ride && (ride.status === "accepted" || ride.status === "driver_arriving" || ride.status === "in_progress")) {
+      console.log("RIDE STATUS IS VALID, UPDATING OPTIMISTICALLY");
+      const currentLocation = { lat: coords.lat, lng: coords.lng };
+      
+      // Optimistically update the driver's own screen
+      setRide((prev) => ({ ...prev, current_location: currentLocation }));
+
+      // Sync to database so the customer sees the car move
+      try {
+        console.log("PATCHING TO DATABASE:", currentLocation);
+        await fetch(`/api/rides/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ current_location: currentLocation }),
+        });
+      } catch (err) {
+        console.error("Location sync error:", err);
+      }
     }
   };
 
@@ -205,9 +315,9 @@ export default function DriverTripPage() {
               <button
                 onClick={() => updateRideStatus("driver_arriving")}
                 disabled={updating}
-                className="w-full h-14 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors disabled:opacity-70"
+                className="w-full bg-slate-800 text-white font-semibold py-3.5 rounded-xl hover:bg-slate-700 transition-colors disabled:opacity-50"
               >
-                {updating ? <Loader2 className="h-5 w-5 animate-spin" /> : "Arrived at Pickup"}
+                {updating ? "Updating..." : "Start Navigation (Arriving)"}
               </button>
             )}
 
@@ -215,9 +325,9 @@ export default function DriverTripPage() {
               <button
                 onClick={() => updateRideStatus("in_progress")}
                 disabled={updating}
-                className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors disabled:opacity-70"
+                className="w-full bg-orange-500 text-white font-semibold py-3.5 rounded-xl hover:bg-orange-600 transition-colors disabled:opacity-50"
               >
-                {updating ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Start Trip <Navigation className="h-5 w-5" /></>}
+                {updating ? "Updating..." : "Passenger Picked Up (Start Trip)"}
               </button>
             )}
 
@@ -225,18 +335,47 @@ export default function DriverTripPage() {
               <button
                 onClick={() => updateRideStatus("completed")}
                 disabled={updating}
-                className="w-full h-14 bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-700 transition-colors disabled:opacity-70"
+                className="w-full bg-green-500 text-white font-semibold py-3.5 rounded-xl hover:bg-green-600 transition-colors disabled:opacity-50"
               >
-                {updating ? <Loader2 className="h-5 w-5 animate-spin" /> : <>Complete Trip <CheckCircle className="h-5 w-5" /></>}
+                {updating ? "Updating..." : "Complete Trip (Drop-off)"}
               </button>
             )}
 
-            {isCompleted && (
+            {/* Simulation Toggle for specific active ride states */}
+            {(ride.status === "driver_arriving" || ride.status === "in_progress") && (
+              <div className="pt-4 mt-4 border-t border-slate-100">
+                <button
+                  onClick={() => setIsSimulating(!isSimulating)}
+                  className={`w-full font-semibold py-2.5 rounded-xl transition-colors border-2 ${
+                    isSimulating 
+                      ? "border-red-500 text-red-600 bg-red-50 hover:bg-red-100" 
+                      : "border-blue-500 text-blue-600 bg-blue-50 hover:bg-blue-100"
+                  }`}
+                >
+                  {isSimulating ? "Stop Simulation" : "Auto-Drive (DevTest)"}
+                </button>
+                <p className="text-xs text-center text-slate-400 mt-2">
+                  Automatically drives the car along the route for testing Live Tracking.
+                </p>
+              </div>
+            )}
+            
+            {isCompleted && ride.payment_status !== "paid" && (
+              <div className="bg-orange-50 text-orange-700 p-4 rounded-xl flex items-center gap-3 border border-orange-200">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <div>
+                  <p className="font-bold">Trip Completed</p>
+                  <p className="text-sm">Waiting for customer to pay ₹{ride.fare}...</p>
+                </div>
+              </div>
+            )}
+
+            {isCompleted && ride.payment_status === "paid" && (
               <div className="bg-green-50 text-green-700 p-4 rounded-xl flex items-center gap-3 border border-green-200">
                 <CheckCircle className="h-6 w-6" />
                 <div>
-                  <p className="font-bold">Trip Complete</p>
-                  <p className="text-sm">Earnings added to wallet.</p>
+                  <p className="font-bold">Payment Received!</p>
+                  <p className="text-sm">Earnings added to your wallet. You are free to take new trips.</p>
                 </div>
               </div>
             )}
@@ -255,6 +394,8 @@ export default function DriverTripPage() {
             pickup={ride.pickup_location}
             dropoff={ride.dropoff_location}
             routeCoords={routeCoords}
+            driverLocation={ride.current_location}
+            onMapClick={handleManualMapClick}
           />
         </div>
       </div>

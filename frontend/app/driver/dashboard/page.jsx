@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import {
   MapPin,
@@ -116,7 +117,6 @@ export default function DriverDashboard() {
     } catch (err) {
       console.error("Error accepting ride:", err);
       alert("Failed to accept ride. Maybe another driver already accepted it.");
-    } finally {
       setAcceptingId(null);
       fetchRides();
     }
@@ -141,10 +141,12 @@ export default function DriverDashboard() {
             Accept a trip to start earning
           </p>
         </div>
-        <div className="flex items-center gap-2 bg-green-50 px-3 py-1.5 rounded-full border border-green-200">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" />
-          <span className="text-xs font-semibold text-green-700">Finding trips...</span>
-        </div>
+        <Link 
+          href="/driver/earnings" 
+          className="flex items-center gap-2 bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-700 transition-colors shadow-sm"
+        >
+          Your Earnings <span>→</span>
+        </Link>
       </div>
 
       {incomingRides.length === 0 ? (

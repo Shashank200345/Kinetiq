@@ -140,12 +140,12 @@ export default function DashboardPage() {
           <p className="text-[11px] text-gray-400 mt-0.5">Plan ahead</p>
         </Link>
 
-        <Link href="/customer/book" className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md hover:border-orange-200 transition-all text-center group">
-          <div className="w-12 h-12 bg-green-50 rounded-xl flex items-center justify-center mx-auto mb-2 group-hover:bg-green-100 transition-colors">
-            <Package className="h-6 w-6 text-green-500" />
+        <Link href="/customer/rides" className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:shadow-md hover:border-orange-200 transition-all text-center group">
+          <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center mx-auto mb-2 group-hover:bg-gray-100 transition-colors">
+            <Clock className="h-6 w-6 text-gray-500" />
           </div>
-          <p className="text-sm font-medium text-gray-800">Package</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Send items</p>
+          <p className="text-sm font-medium text-gray-800">History</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Past trips</p>
         </Link>
       </div>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { supabase } from "@/lib/supabase";
 import { getRoute } from "@/lib/map-utils";
@@ -44,9 +44,13 @@ function getStepIndex(status) {
 export default function RideTrackPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [ride, setRide] = useState(null);
   const [routeCoords, setRouteCoords] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [checkingOut, setCheckingOut] = useState(false);
+
+  const isSuccess = searchParams.get("success");
 
   // Fetch ride data
   const fetchRide = useCallback(async () => {
@@ -55,6 +59,21 @@ export default function RideTrackPage() {
       const data = await res.json();
       if (data.ride) {
         setRide(data.ride);
+
+        // Auto-fulfill payment for local development/testing
+        if (isSuccess === "true" && data.ride.payment_status !== "paid") {
+          const updateRes = await fetch(`/api/rides/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ payment_status: "paid" }),
+          });
+          if (updateRes.ok) {
+            setRide((prev) => ({ ...prev, payment_status: "paid" }));
+            
+            // Clean up the URL safely without triggering React re-renders or router re-fetches
+            window.history.replaceState(null, "", `/customer/ride-track/${id}`);
+          }
+        }
 
         // Fetch route for map
         if (data.ride.pickup_location && data.ride.dropoff_location) {
@@ -101,6 +120,28 @@ export default function RideTrackPage() {
       setRide((prev) => ({ ...prev, status: "cancelled" }));
     } catch (err) {
       console.error("Cancel error:", err);
+    }
+  };
+
+  const handleCheckout = async () => {
+    setCheckingOut(true);
+    try {
+      const res = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId: id }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("Failed to initialize payment");
+      }
+    } catch (err) {
+      console.error("Payment error:", err);
+      alert("Something went wrong");
+    } finally {
+      setCheckingOut(false);
     }
   };
 
@@ -238,13 +279,26 @@ export default function RideTrackPage() {
             </button>
           )}
 
-          {isCompleted && (
-            <Link
-              href={`/payment?amount=${ride.fare}`}
-              className="w-full h-12 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all flex items-center justify-center gap-2"
+          {isCompleted && ride.payment_status !== "paid" && (
+            <button
+              onClick={handleCheckout}
+              disabled={checkingOut}
+              className="w-full h-12 bg-orange-500 text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              Pay ₹{ride.fare} <ArrowRight className="h-4 w-4" />
-            </Link>
+              {checkingOut ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <>Pay ₹{ride.fare} <ArrowRight className="h-4 w-4" /></>
+              )}
+            </button>
+          )}
+
+          {ride.payment_status === "paid" && (
+            <div className="p-5 bg-green-50 border border-green-200 rounded-xl text-center">
+               <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto mb-2" />
+               <p className="text-base font-bold text-green-700">Payment Successful</p>
+               <p className="text-sm text-green-600 mt-1">Thank you for riding with Kinetiq!</p>
+            </div>
           )}
         </div>
 
@@ -254,6 +308,7 @@ export default function RideTrackPage() {
             pickup={ride.pickup_location}
             dropoff={ride.dropoff_location}
             routeCoords={routeCoords}
+            driverLocation={ride.current_location}
           />
         </div>
       </div>
